@@ -15,7 +15,10 @@
 package ssh_config_file
 
 import (
+	"reflect"
 	"testing"
+
+	"github.com/kevinburke/ssh_config"
 )
 
 func TestConvertCLIForwardToConfigFormat(t *testing.T) {
@@ -143,5 +146,56 @@ func TestConvertConfigForwardToCLIFormat(t *testing.T) {
 				t.Errorf("convertConfigForwardToCLIFormat(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestExtractTagsFromHost(t *testing.T) {
+	repo := &Repository{}
+	host := &ssh_config.Host{
+		Nodes: []ssh_config.Node{
+			&ssh_config.Empty{Comment: "tag: foo, bar"},
+		},
+	}
+
+	got := repo.extractTagsFromHost(host)
+	want := []string{"foo", "bar"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("extractTagsFromHost() = %v, want %v", got, want)
+	}
+
+	host.Nodes = []ssh_config.Node{
+		&ssh_config.KV{Key: "User", Value: "git", Comment: "tag: deploy"},
+	}
+	got = repo.extractTagsFromHost(host)
+	want = []string{"deploy"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("extractTagsFromHost() inline = %v, want %v", got, want)
+	}
+}
+
+func TestSetTagsOnHost(t *testing.T) {
+	repo := &Repository{}
+	host := &ssh_config.Host{
+		Nodes: []ssh_config.Node{
+			&ssh_config.KV{Key: "HostName", Value: "example.com"},
+		},
+	}
+
+	repo.setTagsOnHost(host, []string{" foo ", "bar", "Foo"})
+	if len(host.Nodes) != 2 {
+		t.Fatalf("expected 2 nodes after inserting tag comment, got %d", len(host.Nodes))
+	}
+	commentNode, ok := host.Nodes[0].(*ssh_config.Empty)
+	if !ok {
+		t.Fatalf("expected first node to be comment, got %T", host.Nodes[0])
+	}
+	if commentNode.Comment != "tag: foo, bar" {
+		t.Fatalf("unexpected comment: %q", commentNode.Comment)
+	}
+
+	// Removing tags should drop the comment node
+	repo.setTagsOnHost(host, nil)
+	if len(host.Nodes) != 1 {
+		t.Fatalf("expected tag comment removed, remaining nodes %d", len(host.Nodes))
 	}
 }

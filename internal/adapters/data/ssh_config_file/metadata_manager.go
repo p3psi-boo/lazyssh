@@ -26,7 +26,7 @@ import (
 )
 
 type ServerMetadata struct {
-	Tags     []string `json:"tags,omitempty"`
+	Tags     []string `json:"tags,omitempty"` // Deprecated: tags now stored directly in ssh config comments
 	LastSeen string   `json:"last_seen,omitempty"`
 	PinnedAt string   `json:"pinned_at,omitempty"`
 	SSHCount int      `json:"ssh_count,omitempty"`
@@ -101,8 +101,7 @@ func (m *metadataManager) updateServer(server domain.Server, oldAlias string) er
 
 	existing := metadata[server.Alias]
 	merged := existing
-
-	merged.Tags = server.Tags
+	merged.Tags = nil
 
 	if !server.LastSeen.IsZero() {
 		merged.LastSeen = server.LastSeen.Format(time.RFC3339)

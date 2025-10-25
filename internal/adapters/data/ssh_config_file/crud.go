@@ -185,6 +185,8 @@ func (r *Repository) createHostFromServer(server domain.Server) *ssh_config.Host
 	// Debugging
 	r.addKVNodeIfNotEmpty(host, "LogLevel", server.LogLevel)
 
+	r.setTagsOnHost(host, server.Tags)
+
 	return host
 }
 
@@ -256,6 +258,136 @@ func removeNodesByKey(nodes []ssh_config.Node, key string) []ssh_config.Node {
 		filtered = append(filtered, node)
 	}
 	return filtered
+}
+
+const tagsCommentKey = "tag"
+
+func (r *Repository) formatTagsComment(tags []string) string {
+	clean := r.normalizeTags(tags)
+	if len(clean) == 0 {
+		return ""
+	}
+	return tagsCommentKey + ": " + strings.Join(clean, ", ")
+}
+
+func (r *Repository) normalizeTags(tags []string) []string {
+	seen := make(map[string]struct{}, len(tags))
+	clean := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		trimmed := strings.TrimSpace(tag)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		clean = append(clean, trimmed)
+	}
+	return clean
+}
+
+func (r *Repository) isTagsComment(comment string) bool {
+	trimmed := strings.TrimSpace(comment)
+	if trimmed == "" {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(trimmed), tagsCommentKey+":")
+}
+
+func (r *Repository) parseTagsFromComment(comment string) ([]string, bool) {
+	trimmed := strings.TrimSpace(comment)
+	if trimmed == "" {
+		return nil, false
+	}
+	lower := strings.ToLower(trimmed)
+	prefix := tagsCommentKey + ":"
+	if !strings.HasPrefix(lower, prefix) {
+		return nil, false
+	}
+
+	value := strings.TrimSpace(trimmed[len(prefix):])
+	if value == "" {
+		return []string{}, true
+	}
+
+	parts := strings.Split(value, ",")
+	tags := make([]string, 0, len(parts))
+	for _, part := range parts {
+		tag := strings.TrimSpace(part)
+		if tag != "" {
+			tags = append(tags, tag)
+		}
+	}
+	return tags, true
+}
+
+func (r *Repository) extractTagsFromHost(host *ssh_config.Host) []string {
+	if host == nil {
+		return nil
+	}
+
+	if tags, ok := r.parseTagsFromComment(host.EOLComment); ok {
+		return tags
+	}
+
+	for _, node := range host.Nodes {
+		if commentNode, ok := node.(*ssh_config.Empty); ok {
+			if tags, ok := r.parseTagsFromComment(commentNode.Comment); ok {
+				return tags
+			}
+		}
+		if kvNode, ok := node.(*ssh_config.KV); ok {
+			if tags, ok := r.parseTagsFromComment(kvNode.Comment); ok {
+				return tags
+			}
+		}
+	}
+
+	return nil
+}
+
+func (r *Repository) setTagsOnHost(host *ssh_config.Host, tags []string) {
+	if host == nil {
+		return
+	}
+
+	tags = r.normalizeTags(tags)
+
+	if r.isTagsComment(host.EOLComment) {
+		host.EOLComment = ""
+		host.SpaceBeforeComment = ""
+	}
+
+	filtered := make([]ssh_config.Node, 0, len(host.Nodes))
+	for _, node := range host.Nodes {
+		if commentNode, ok := node.(*ssh_config.Empty); ok {
+			if r.isTagsComment(commentNode.Comment) {
+				continue
+			}
+		}
+		filtered = append(filtered, node)
+	}
+	host.Nodes = filtered
+
+	comment := r.formatTagsComment(tags)
+	if comment == "" {
+		return
+	}
+
+	tagNode := &ssh_config.Empty{Comment: comment}
+
+	insertIdx := 0
+	for insertIdx < len(host.Nodes) {
+		if _, ok := host.Nodes[insertIdx].(*ssh_config.Empty); ok {
+			insertIdx++
+			continue
+		}
+		break
+	}
+
+	host.Nodes = append(host.Nodes[:insertIdx], append([]ssh_config.Node{tagNode}, host.Nodes[insertIdx:]...)...)
 }
 
 // updateHostNodes updates the nodes of an existing host with new server details.
@@ -374,6 +506,8 @@ func (r *Repository) updateHostNodes(host *ssh_config.Host, newServer domain.Ser
 	for _, env := range newServer.SetEnv {
 		r.addKVNodeIfNotEmpty(host, "SetEnv", env)
 	}
+
+	r.setTagsOnHost(host, newServer.Tags)
 }
 
 // updateOrAddKVNode updates an existing key-value node or adds a new one if it doesn't exist.

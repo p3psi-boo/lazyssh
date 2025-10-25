@@ -57,6 +57,10 @@ func (r *Repository) toDomainServer(cfg *ssh_config.Config) []domain.Server {
 			r.mapKVToServer(&server, kvNode)
 		}
 
+		if tags := r.extractTagsFromHost(host); len(tags) > 0 {
+			server.Tags = tags
+		}
+
 		servers = append(servers, server)
 	}
 
@@ -297,7 +301,9 @@ func (r *Repository) mergeMetadata(servers []domain.Server, metadata map[string]
 		servers[i].LastSeen = time.Time{}
 
 		if meta, exists := metadata[server.Alias]; exists {
-			servers[i].Tags = meta.Tags
+			if len(servers[i].Tags) == 0 && len(meta.Tags) > 0 {
+				servers[i].Tags = meta.Tags
+			}
 			servers[i].SSHCount = meta.SSHCount
 
 			if meta.LastSeen != "" {
