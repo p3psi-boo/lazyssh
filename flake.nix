@@ -47,7 +47,6 @@
             goToolchain
             golangci-lint
             gofumpt
-            staticcheck
             gnumake
             git
           ];
